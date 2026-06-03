@@ -1,0 +1,270 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ── Enums ──────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  AGENT
+}
+
+enum UserStatus {
+  AVAILABLE
+  AWAY
+  BUSY
+}
+
+enum Channel {
+  EMAIL
+  CHAT
+  WHATSAPP
+}
+
+enum TicketStatus {
+  NEW
+  OPEN
+  PENDING
+  SOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum AiStatus {
+  NONE
+  SUGGESTED
+  RESOLVED
+}
+
+enum SlaState {
+  OK
+  WARNING
+  BREACHED
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageAuthorType {
+  CUSTOMER
+  AGENT
+  AI
+}
+
+enum AuditActorType {
+  USER
+  AI
+  SYSTEM
+}
+
+enum ChannelStatus {
+  PENDING
+  ACTIVE
+  ERROR
+}
+
+enum DeliveryStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+}
+
+// ── Models ─────────────────────────────────────────────────────────────────
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+
+  users              User[]
+  customers          Customer[]
+  conversations      Conversation[]
+  tickets            Ticket[]
+  auditRecords       AuditRecord[]
+  slaPolicies        SlaPolicy[]
+  knowledgeArticles  KnowledgeArticle[]
+  aiSuggestions      AiSuggestion[]
+  channelConnections ChannelConnection[]
+}
+
+model User {
+  id                   String     @id @default(cuid())
+  organizationId       String
+  email                String
+  passwordHash         String?
+  name                 String
+  role                 UserRole   @default(AGENT)
+  status               UserStatus @default(AVAILABLE)
+  inviteToken          String?    @unique
+  inviteTokenExpiresAt DateTime?
+  createdAt            DateTime   @default(now())
+
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  assignedTickets Ticket[]     @relation("AssignedTickets")
+
+  @@unique([organizationId, email])
+}
+
+model Customer {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  email          String
+  phone          String?
+  avatarUrl      String?
+  attributes     Json     @default("{}")
+  notes          String?
+  createdAt      DateTime @default(now())
+
+  organization  Organization   @relation(fields: [organizationId], references: [id])
+  conversations Conversation[]
+  tickets       Ticket[]
+
+  @@unique([organizationId, email])
+}
+
+model Conversation {
+  id               String   @id @default(cuid())
+  organizationId   String
+  customerId       String
+  channel          Channel
+  externalThreadId String?
+  createdAt        DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  customer     Customer     @relation(fields: [customerId], references: [id])
+  messages     Message[]
+  ticket       Ticket?
+}
+
+model Message {
+  id                String            @id @default(cuid())
+  organizationId    String
+  conversationId    String
+  direction         MessageDirection
+  body              String
+  authorType        MessageAuthorType
+  authorId          String?
+  externalMessageId String?
+  providerMessageId String?
+  deliveryStatus    DeliveryStatus    @default(PENDING)
+  headers           Json              @default("{}")
+  createdAt         DateTime          @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+}
+
+model Ticket {
+  id                 String         @id @default(cuid())
+  organizationId     String
+  conversationId     String         @unique
+  customerId         String
+  subject            String
+  status             TicketStatus   @default(NEW)
+  priority           TicketPriority @default(NORMAL)
+  assigneeId         String?
+  channel            Channel
+  tags               String[]
+  aiStatus           AiStatus       @default(NONE)
+  intent             String?
+  slaState           SlaState       @default(OK)
+  firstResponseDueAt DateTime?
+  resolutionDueAt    DateTime?
+  firstResponseAt    DateTime?
+  solvedAt           DateTime?
+  deletedAt          DateTime?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  organization  Organization   @relation(fields: [organizationId], references: [id])
+  conversation  Conversation   @relation(fields: [conversationId], references: [id])
+  customer      Customer       @relation(fields: [customerId], references: [id])
+  assignee      User?          @relation("AssignedTickets", fields: [assigneeId], references: [id])
+  aiSuggestions AiSuggestion[]
+}
+
+model SlaPolicy {
+  id                   String   @id @default(cuid())
+  organizationId       String
+  name                 String
+  firstResponseMinutes Int
+  resolutionMinutes    Int
+  createdAt            DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+}
+
+model KnowledgeArticle {
+  id                 String   @id @default(cuid())
+  organizationId     String
+  title              String
+  body               String
+  tags               String[]
+  embedding          Json?
+  freshnessUpdatedAt DateTime @default(now())
+  createdAt          DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+}
+
+model AiSuggestion {
+  id             String    @id @default(cuid())
+  organizationId String
+  ticketId       String
+  messageId      String?
+  intent         String
+  draft          String
+  citations      Json      @default("[]")
+  confidence     Float
+  acceptedAt     DateTime?
+  rejectedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  ticket       Ticket       @relation(fields: [ticketId], references: [id])
+}
+
+model AuditRecord {
+  id             String         @id @default(cuid())
+  organizationId String
+  actorType      AuditActorType
+  actorId        String?
+  action         String
+  entityType     String
+  entityId       String
+  metadata       Json           @default("{}")
+  createdAt      DateTime       @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+}
+
+model ChannelConnection {
+  id             String        @id @default(cuid())
+  organizationId String
+  channel        Channel
+  status         ChannelStatus @default(PENDING)
+  config         Json // shape varies by channel; secrets encrypted
+  verifiedAt     DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, channel])
+  @@index([organizationId])
+}

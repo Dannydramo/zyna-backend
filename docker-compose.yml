@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: zyra_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: zyra
+      POSTGRES_PASSWORD: zyra_secret
+      POSTGRES_DB: zyra_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - zyra_pgdata:/var/lib/postgresql/data
+
+volumes:
+  zyra_pgdata:

@@ -1,0 +1,1 @@
+{"version":3,"file":"channel-not-active.exception.js","sourceRoot":"","sources":["../../../../../../src/modules/channels/dispatcher/exceptions/channel-not-active.exception.ts"],"names":[],"mappings":";;;AAAA,2CAAqD;AAGrD,MAAa,yBAA0B,SAAQ,4BAAmB;IAChE,YAAY,OAAgB;QAC1B,KAAK,CAAC,WAAW,OAAO,iEAAiE,CAAC,CAAC;QAC3F,IAAI,CAAC,IAAI,GAAG,2BAA2B,CAAC;IAC1C,CAAC;CACF;AALD,8DAKC"}
