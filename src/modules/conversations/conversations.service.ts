@@ -162,6 +162,51 @@ export class ConversationsService {
       this.logger.log(`[CHAT_REPLY] Chat message saved to DB, widget will poll for it`);
     }
 
+    // For WHATSAPP channel, send via WhatsApp API
+    if (ticket.channel === Channel.WHATSAPP && ticket.customer?.phone) {
+      this.logger.log(`[WHATSAPP_REPLY_START] Sending WhatsApp message to ${ticket.customer.phone}`);
+      try {
+        const channel = await this.prisma.channelConnection.findFirst({
+          where: { organizationId: orgId, channel: Channel.WHATSAPP, status: 'ACTIVE' },
+        });
+
+        if (!channel) {
+          this.logger.warn(`[WHATSAPP_SKIP] No active WhatsApp channel found`);
+        } else {
+          const cfg = channel.config as any;
+          const phoneNumberId = cfg.phoneNumberId;
+          const accessToken = cfg.accessToken;
+
+          const response = await fetch(`https://graph.instagram.com/v18.0/${phoneNumberId}/messages`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              messaging_product: 'whatsapp',
+              to: ticket.customer.phone.replace(/[+\s-()]/g, ''),
+              type: 'text',
+              text: { body: dto.body },
+            }),
+          });
+
+          console.log(`[WHATSAPP RESPONSE] ${response}`)
+
+          if (!response.ok) {
+            const error = await response.json();
+            this.logger.error(`[WHATSAPP_ERROR] ${JSON.stringify(error)}`);
+          } else {
+            this.logger.log(`✅ [WHATSAPP_SENT] Message sent to ${ticket.customer.phone}`);
+          }
+        }
+      } catch (error) {
+        this.logger.error(
+          `❌ [WHATSAPP_FAILED] Failed to send WhatsApp: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
     // Update ticket status
     this.logger.log(`[TICKET_UPDATE_START] Updating ticket status and firstResponseAt...`);
     await this.prisma.ticket.update({

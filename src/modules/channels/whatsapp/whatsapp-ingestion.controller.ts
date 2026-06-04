@@ -1,56 +1,67 @@
-import { Body, Controller, Post, BadRequestException, Logger } from '@nestjs/common';
+import { Body, Controller, Get, Logger, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { PrismaService } from '../../../prisma/prisma.service';
-import { IngestionService } from '../../ingestion/ingestion.service';
+import { Public } from '../../../common/decorators/public.decorator';
+import { WhatsAppService } from './whatsapp.service';
 
-@ApiTags('whatsapp-ingestion')
-@Controller('ingest/whatsapp')
+@ApiTags('whatsapp')
+@Controller('whatsapp')
 export class WhatsAppIngestionController {
   private readonly logger = new Logger(WhatsAppIngestionController.name);
 
-  constructor(
-    private readonly ingestionService: IngestionService,
-    private readonly prisma: PrismaService,
-  ) {}
+  constructor(private readonly whatsappService: WhatsAppService) {}
 
-  @Post()
-  @ApiOperation({ summary: 'WhatsApp webhook from Twilio/Meta (with multi-tenant routing)' })
-  async ingestMessage(@Body() payload: Record<string, unknown>) {
-    // Extract phone number from provider payload
-    // Twilio: From field; Meta: wa_id field
-    const phoneNumber = (payload.From || payload.wa_id) as string;
+  @Get('webhooks')
+  @Public()
+  @ApiOperation({ summary: 'WhatsApp webhook verification' })
+  verifyWebhook(
+    @Query('hub.mode') mode: string,
+    @Query('hub.challenge') challenge: string,
+    @Query('hub.verify_token') verifyToken: string,
+  ) {
+    this.logger.log(`[WEBHOOK_VERIFY] Mode: ${mode}, Token: ${verifyToken}`);
 
-    if (!phoneNumber) {
-      throw new BadRequestException('Missing phone number in webhook payload');
+    if (mode === 'subscribe' && verifyToken === 'zyna_webhook_token') {
+      return parseInt(challenge, 10);
     }
 
-    // Find org that owns this phone number
-    const allConnections = await this.prisma.channelConnection.findMany({
-      where: { channel: 'WHATSAPP' },
-    });
+    return { error: 'Invalid token' };
+  }
 
-    const connection = allConnections.find((c) => {
-      const cfg = c.config as Record<string, unknown>;
-      return (cfg.displayPhoneNumber as string)?.replace(/\D/g, '') === phoneNumber.replace(/\D/g, '');
-    });
+  @Post('webhooks')
+  @Public()
+  @ApiOperation({ summary: 'Receive incoming WhatsApp messages' })
+  async handleWebhook(@Body() payload: any) {
+    this.logger.log(`[WEBHOOK_RECEIVED] Payload: ${JSON.stringify(payload)}`);
 
-    if (!connection) {
-      this.logger.warn(`WhatsApp webhook for unknown phone number: ${phoneNumber}`);
-      throw new BadRequestException(`No WhatsApp channel configured for ${phoneNumber}`);
+    try {
+      const entry = payload?.entry?.[0];
+      if (!entry) return { ok: true };
+
+      const changes = entry.changes?.[0];
+      if (!changes) return { ok: true };
+
+      const value = changes.value;
+      const messages = value?.messages;
+      const metadata = value?.metadata;
+
+      if (!messages || !metadata) return { ok: true };
+
+      const phoneNumberId = metadata.phone_number_id;
+      const message = messages[0];
+
+      if (message.type === 'text') {
+        await this.whatsappService.handleIncomingMessage(
+          phoneNumberId,
+          message.from,
+          message.text.body,
+          message.id,
+        );
+      }
+
+      return { ok: true };
+    } catch (error) {
+      this.logger.error(`[WEBHOOK_ERROR] ${error instanceof Error ? error.message : String(error)}`);
+      return { ok: true };
     }
-
-    // Ingest as inbound message
-    // In production, parse the full Twilio/Meta payload structure
-    const messageBody = (payload.Body || payload.text) as string;
-    const fromPhone = (payload.From || payload.wa_id) as string;
-
-    return this.ingestionService.ingestEmail(connection.organizationId, {
-      fromEmail: `${fromPhone}@whatsapp`,
-      toAddress: phoneNumber,
-      subject: 'WhatsApp Message',
-      body: messageBody,
-      messageId: `wa-${payload.MessageSid || payload.id}`,
-      threadId: phoneNumber,
-    } as any);
   }
 }

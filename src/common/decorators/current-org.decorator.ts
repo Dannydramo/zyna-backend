@@ -13,11 +13,15 @@ export const CurrentOrg = createParamDecorator(
       orgId?: string;
       user?: { organizationId?: string };
     }>();
-    return (
-      request.user?.organizationId ??
-      request.orgId ??
-      request.headers['x-org-id'] ??
-      (process.env.DEFAULT_ORG_ID as string)
-    );
+
+    // ALWAYS use the authenticated user's organizationId from JWT
+    // Never fall back to defaults - ensures users can only access their own org's data
+    const orgId = request.user?.organizationId;
+
+    if (!orgId) {
+      throw new Error('No organization context. User must be authenticated.');
+    }
+
+    return orgId;
   },
 );

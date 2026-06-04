@@ -65,14 +65,11 @@ export class TicketsService {
     const skip = (page - 1) * limit;
 
     // Build base where clause
-    // Admins see all organizations' tickets, non-admins see only their org
+    // ALL users are always scoped to their organization
     const where: any = {
+      organizationId: orgId,
       deletedAt: null,
     };
-
-    if (user.role !== 'ADMIN') {
-      where.organizationId = orgId;
-    }
 
     // Apply tab filters
     switch (tab) {

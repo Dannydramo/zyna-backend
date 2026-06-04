@@ -1,40 +1,72 @@
-import { Body, Controller, Delete, Get, Post, UseGuards } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Post } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentOrg } from '../../../common/decorators/current-org.decorator';
-import { OrgGuard } from '../../../common/guards/org.guard';
-import { ChannelConnectionsService } from '../channel-connections/channel-connections.service';
-import { ConnectWhatsAppDto } from './dto/connect-whatsapp.dto';
+import { PrismaService } from '../../../prisma/prisma.service';
+import { Channel } from '../../../generated/prisma/enums';
 
-@ApiTags('channels-whatsapp')
-@UseGuards(OrgGuard)
+@ApiBearerAuth()
+@ApiTags('channels')
 @Controller('channels/whatsapp')
 export class WhatsAppController {
-  constructor(private readonly connectionsService: ChannelConnectionsService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  @Post()
-  @ApiOperation({ summary: 'Connect a WhatsApp Business number' })
-  connect(@CurrentOrg() orgId: string, @Body() dto: ConnectWhatsAppDto) {
-    return this.connectionsService.update(
-      orgId,
-      'WHATSAPP',
-      {
-        phoneNumberId: dto.phoneNumberId,
-        displayPhoneNumber: dto.displayPhoneNumber,
-        accessTokenRef: `whatsapp-token-${Date.now()}`, // In production, encrypt token in separate table
+  @Post('configure')
+  @ApiOperation({ summary: 'Configure WhatsApp channel' })
+  async configure(
+    @CurrentOrg() orgId: string,
+    @Body() dto: any,
+  ) {
+    const { phoneNumberId, wabaId, accessToken, phoneNumber } = dto;
+
+    if (!phoneNumberId || !wabaId || !accessToken || !phoneNumber) {
+      throw new Error('Missing required fields: phoneNumberId, wabaId, accessToken, phoneNumber');
+    }
+
+    // Check if already exists
+    const existing = await this.prisma.channelConnection.findFirst({
+      where: { organizationId: orgId, channel: Channel.WHATSAPP },
+    });
+
+    if (existing) {
+      // Update
+      await this.prisma.channelConnection.update({
+        where: { id: existing.id },
+        data: {
+          config: {
+            phoneNumberId,
+            wabaId,
+            accessToken, // Should be encrypted
+            phoneNumber,
+            webhookToken: 'zyna_webhook_token', // TODO: generate unique token
+          },
+          status: 'ACTIVE',
+        },
+      });
+    } else {
+      // Create
+      await this.prisma.channelConnection.create({
+        data: {
+          organizationId: orgId,
+          channel: Channel.WHATSAPP,
+          status: 'ACTIVE',
+          config: {
+            phoneNumberId,
+            wabaId,
+            accessToken, // Should be encrypted
+            phoneNumber,
+            webhookToken: 'zyna_webhook_token',
+          },
+        },
+      });
+    }
+
+    return {
+      data: {
+        success: true,
+        message: 'WhatsApp configured successfully',
+        webhookUrl: `${process.env.API_URL || 'http://localhost:4000'}/api/v1/whatsapp/webhooks`,
+        webhookToken: 'zyna_webhook_token',
       },
-      'ACTIVE', // Skip verification for sandbox; production requires provider validation
-    );
-  }
-
-  @Get()
-  @ApiOperation({ summary: 'Get current WhatsApp connection' })
-  getConnection(@CurrentOrg() orgId: string) {
-    return this.connectionsService.get(orgId, 'WHATSAPP');
-  }
-
-  @Delete()
-  @ApiOperation({ summary: 'Disconnect WhatsApp' })
-  disconnect(@CurrentOrg() orgId: string) {
-    return this.connectionsService.delete(orgId, 'WHATSAPP');
+    };
   }
 }
